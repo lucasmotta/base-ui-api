@@ -4,6 +4,7 @@ export interface ApiProp {
   prop: string
   type: string
   default: string
+  description: string
 }
 
 export interface ApiSection {
@@ -54,12 +55,17 @@ function parseSectionProps($: cheerio.CheerioAPI, section: cheerio.Element): Api
       const prop = parseSummaryLabel(label)
       if (!prop) return
 
+      const details = $(el).closest("details")
+
       // When the type is "Union", look inside the <details> for the actual type
       if (prop.type === "Union") {
-        const typeDt = $(el).closest("details").find("dt").filter((_, dt) => $(dt).text().trim() === "Type")
+        const typeDt = details.find("dt").filter((_, dt) => $(dt).text().trim() === "Type")
         const unionType = typeDt.next("dd").text().trim()
         if (unionType) prop.type = unionType
       }
+
+      const descDt = details.find("dt").filter((_, dt) => $(dt).text().trim() === "Description")
+      prop.description = descDt.next("dd").text().trim()
 
       props.push(prop)
     })
