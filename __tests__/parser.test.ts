@@ -108,6 +108,17 @@ function makePropSummary(prop: string, type: string, defaultVal?: string) {
   </details>`
 }
 
+function makeUnionPropSummary(prop: string, unionType: string, defaultVal?: string) {
+  const defaultPart = defaultVal !== undefined ? ` (default: ${defaultVal})` : ""
+  return `<details class="AccordionItem">
+    <summary aria-label="Prop: ${prop}, type: Union${defaultPart}"></summary>
+    <dl>
+      <dt>Type</dt>
+      <dd>${unionType}</dd>
+    </dl>
+  </details>`
+}
+
 function makeSection(sectionId: string, ...props: string[]) {
   return `<section aria-describedby="${sectionId}-caption">
     ${props.join("\n")}
@@ -213,6 +224,20 @@ describe("extractApiReference", () => {
     `)
     const api = extractApiReference(html)
     expect(api[0].props[0].type).toBe("RefObject<Actions | null>")
+  })
+
+  it("resolves Union type from expanded <details> Type dt", () => {
+    const html = makeHtml(`
+      <h2>API reference</h2>
+      ${makeSection(
+        "Combobox",
+        makeUnionPropSummary("value", "string | number | string[]"),
+        makePropSummary("disabled", "boolean", "false")
+      )}
+    `)
+    const api = extractApiReference(html)
+    expect(api[0].props[0]).toEqual({ prop: "value", type: "string | number | string[]", default: "-" })
+    expect(api[0].props[1]).toEqual({ prop: "disabled", type: "boolean", default: "false" })
   })
 
   it("handles multiple sections with no description paragraphs", () => {
