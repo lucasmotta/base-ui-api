@@ -1,17 +1,23 @@
 import { NextResponse } from "next/server"
 import { unstable_cache } from "next/cache"
+import {
+  type ApiSection,
+  extractApiReference,
+  extractSubtitle,
+  extractMainExample,
+} from "./parser"
 
 // Cache the API response at the route segment level for 7 days
 export const revalidate = 604800
 
 const BASE_UI_LLMS_URL = "https://base-ui.com/llms.txt"
-const BASE_URL = "https://base-ui.com"
 
 interface DocItem {
   title: string
   subtitle: string
   href: string
   example: string
+  api: ApiSection[]
 }
 
 interface BaseUIDocumentation {
@@ -34,7 +40,6 @@ function parseLlmsTxt(content: string): {
   let inUtilitiesSection = false
 
   for (const line of lines) {
-    // Detect section headers
     if (line.trim() === "## Components") {
       inComponentsSection = true
       inUtilitiesSection = false
@@ -53,12 +58,10 @@ function parseLlmsTxt(content: string): {
 
     if (!inComponentsSection && !inUtilitiesSection) continue
 
-    // Parse: - [Title](https://base-ui.com/react/components/button.md): Description
     const match = line.match(/^- \[([^\]]+)\]\(([^)]+)\)/)
     if (match) {
       const title = match[1].trim()
       const mdUrl = match[2].trim()
-      // Convert .md URL to the canonical web URL
       const href = mdUrl.replace(/\.md$/, "")
 
       if (inComponentsSection) {
@@ -72,60 +75,39 @@ function parseLlmsTxt(content: string): {
   return { components, utilities }
 }
 
-// Extract frontmatter subtitle from a .md file
-function extractSubtitle(md: string): string {
-  const frontmatterMatch = md.match(/^---\n([\s\S]*?)\n---/)
-  if (!frontmatterMatch) return ""
-  const subtitleMatch = frontmatterMatch[1].match(/^subtitle:\s*(.+)$/m)
-  return subtitleMatch ? subtitleMatch[1].trim() : ""
-}
+const HEADERS = { "User-Agent": "Base-UI-Docs-Fetcher/1.0" }
 
-// Extract the first Tailwind tsx code block from a .md file
-function extractMainExample(md: string): string {
-  // Look for Tailwind section first, then fall back to the very first tsx block
-  const tailwindSection = md.indexOf("### Tailwind")
-  const searchFrom = tailwindSection !== -1 ? tailwindSection : 0
-
-  const codeBlockMatch = md.slice(searchFrom).match(/```tsx\n([\s\S]*?)```/)
-  if (codeBlockMatch) {
-    return codeBlockMatch[1].trim()
-  }
-
-  return ""
-}
-
-// Fetch a single .md page and extract subtitle from frontmatter + the main example
 async function fetchDocItem(item: {
   title: string
   mdUrl: string
   href: string
 }): Promise<DocItem> {
+  const empty: DocItem = { title: item.title, subtitle: "", href: item.href, example: "", api: [] }
   try {
-    const response = await fetch(item.mdUrl, {
-      headers: { "User-Agent": "Base-UI-Docs-Fetcher/1.0" },
-    })
+    const [mdRes, htmlRes] = await Promise.all([
+      fetch(item.mdUrl, { headers: HEADERS }),
+      fetch(item.href, { headers: HEADERS }),
+    ])
 
-    if (!response.ok) {
-      return { title: item.title, subtitle: "", href: item.href, example: "" }
+    if (!mdRes.ok || !htmlRes.ok) return empty
+
+    const [md, html] = await Promise.all([mdRes.text(), htmlRes.text()])
+
+    return {
+      title: item.title,
+      subtitle: extractSubtitle(md),
+      href: item.href,
+      example: extractMainExample(md),
+      api: extractApiReference(html),
     }
-
-    const md = await response.text()
-    const subtitle = extractSubtitle(md)
-    const example = extractMainExample(md)
-
-    return { title: item.title, subtitle, href: item.href, example }
   } catch {
-    return { title: item.title, subtitle: "", href: item.href, example: "" }
+    return empty
   }
 }
 
-// Cache the entire documentation fetch for 7 days (604800 seconds)
 const fetchBaseUIDocumentation = unstable_cache(
   async (): Promise<BaseUIDocumentation> => {
-    const response = await fetch(BASE_UI_LLMS_URL, {
-      headers: { "User-Agent": "Base-UI-Docs-Fetcher/1.0" },
-    })
-
+    const response = await fetch(BASE_UI_LLMS_URL, { headers: HEADERS })
     if (!response.ok) {
       throw new Error(`Failed to fetch llms.txt: ${response.status}`)
     }
@@ -133,32 +115,23 @@ const fetchBaseUIDocumentation = unstable_cache(
     const content = await response.text()
     const { components: parsedComponents, utilities: parsedUtilities } = parseLlmsTxt(content)
 
-    // Fetch all component and utility pages in parallel
     const [components, utilities] = await Promise.all([
       Promise.all(parsedComponents.map(fetchDocItem)),
       Promise.all(parsedUtilities.map(fetchDocItem)),
     ])
 
-    return {
-      components,
-      utilities,
-      fetchedAt: new Date().toISOString(),
-    }
+    return { components, utilities, fetchedAt: new Date().toISOString() }
   },
   ["base-ui-documentation"],
-  { revalidate: 604800 } // 7 days
+  { revalidate: 604800 }
 )
 
 export async function GET() {
   try {
     const documentation = await fetchBaseUIDocumentation()
-
     return NextResponse.json(documentation)
   } catch (error) {
     console.error("Error fetching Base UI documentation:", error)
-    return NextResponse.json(
-      { error: "Failed to fetch Base UI documentation" },
-      { status: 500 }
-    )
+    return NextResponse.json({ error: "Failed to fetch Base UI documentation" }, { status: 500 })
   }
 }
