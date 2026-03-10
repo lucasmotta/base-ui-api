@@ -101,18 +101,26 @@ function makeHtml(apiBody: string) {
   </main></body></html>`
 }
 
-function makePropSummary(prop: string, type: string, defaultVal?: string) {
+function makePropSummary(prop: string, type: string, defaultVal?: string, description?: string) {
   const defaultPart = defaultVal !== undefined ? ` (default: ${defaultVal})` : ""
+  const descriptionPart = description !== undefined
+    ? `<dl><div><dt>Description</dt><dd>${description}</dd></div></dl>`
+    : ""
   return `<details class="AccordionItem">
     <summary aria-label="Prop: ${prop}, type: ${type}${defaultPart}"></summary>
+    ${descriptionPart}
   </details>`
 }
 
-function makeUnionPropSummary(prop: string, unionType: string, defaultVal?: string) {
+function makeUnionPropSummary(prop: string, unionType: string, defaultVal?: string, description?: string) {
   const defaultPart = defaultVal !== undefined ? ` (default: ${defaultVal})` : ""
+  const descriptionPart = description !== undefined
+    ? `<div><dt>Description</dt><dd>${description}</dd></div>`
+    : ""
   return `<details class="AccordionItem">
     <summary aria-label="Prop: ${prop}, type: Union${defaultPart}"></summary>
     <dl>
+      ${descriptionPart}
       <dt>Type</dt>
       <dd>${unionType}</dd>
     </dl>
@@ -145,8 +153,8 @@ describe("extractApiReference", () => {
     expect(api).toHaveLength(1)
     expect(api[0].title).toBe("Button")
     expect(api[0].props).toHaveLength(3)
-    expect(api[0].props[0]).toEqual({ prop: "focusableWhenDisabled", type: "boolean", default: "false" })
-    expect(api[0].props[2]).toEqual({ prop: "className", type: "string | function", default: "-" })
+    expect(api[0].props[0]).toEqual({ prop: "focusableWhenDisabled", type: "boolean", default: "false", description: "" })
+    expect(api[0].props[2]).toEqual({ prop: "className", type: "string | function", default: "-", description: "" })
   })
 
   it("parses a multi-section component (with h3s)", () => {
@@ -236,8 +244,22 @@ describe("extractApiReference", () => {
       )}
     `)
     const api = extractApiReference(html)
-    expect(api[0].props[0]).toEqual({ prop: "value", type: "string | number | string[]", default: "-" })
-    expect(api[0].props[1]).toEqual({ prop: "disabled", type: "boolean", default: "false" })
+    expect(api[0].props[0]).toEqual({ prop: "value", type: "string | number | string[]", default: "-", description: "" })
+    expect(api[0].props[1]).toEqual({ prop: "disabled", type: "boolean", default: "false", description: "" })
+  })
+
+  it("extracts description from inside the prop <details> element", () => {
+    const html = makeHtml(`
+      <h2>API reference</h2>
+      ${makeSection(
+        "DialogRoot",
+        makePropSummary("defaultOpen", "boolean", "false", "Whether the dialog is initially open."),
+        makePropSummary("open", "boolean", undefined)
+      )}
+    `)
+    const api = extractApiReference(html)
+    expect(api[0].props[0].description).toBe("Whether the dialog is initially open.")
+    expect(api[0].props[1].description).toBe("")
   })
 
   it("handles multiple sections with no description paragraphs", () => {
