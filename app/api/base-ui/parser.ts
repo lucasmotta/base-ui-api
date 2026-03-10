@@ -52,7 +52,16 @@ function parseSectionProps($: cheerio.CheerioAPI, section: cheerio.Element): Api
       const label = $(el).attr("aria-label") ?? ""
       if (!label.startsWith("Prop:")) return
       const prop = parseSummaryLabel(label)
-      if (prop) props.push(prop)
+      if (!prop) return
+
+      // When the type is "Union", look inside the <details> for the actual type
+      if (prop.type === "Union") {
+        const typeDt = $(el).closest("details").find("dt").filter((_, dt) => $(dt).text().trim() === "Type")
+        const unionType = typeDt.next("dd").text().trim()
+        if (unionType) prop.type = unionType
+      }
+
+      props.push(prop)
     })
   return props
 }
